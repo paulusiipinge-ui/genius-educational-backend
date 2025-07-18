@@ -2,6 +2,9 @@ const express = require('express');
 const cors = require('cors');
 const sgMail = require('@sendgrid/mail');
 const twilio = require('twilio');
+const fetch = require('node-fetch');
+const PDFDocument = require('pdfkit');
+const sharp = require('sharp');
 require('dotenv').config();
 
 const app = express();
@@ -17,7 +20,136 @@ sgMail.setApiKey(process.env.SENDGRID_API_KEY);
 // Initialize Twilio
 const twilioClient = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
 
-// Email templates
+// Utility function to create PDF as base64
+const createPDFBuffer = (content) => {
+  return new Promise((resolve, reject) => {
+    const doc = new PDFDocument();
+    const chunks = [];
+    
+    doc.on('data', chunk => chunks.push(chunk));
+    doc.on('end', () => {
+      const buffer = Buffer.concat(chunks);
+      resolve(buffer.toString('base64'));
+    });
+    doc.on('error', reject);
+    
+    // Add content to PDF
+    doc.fontSize(20).text(content.title, 100, 100);
+    doc.fontSize(12).text(content.body, 100, 150);
+    
+    doc.end();
+  });
+};
+
+// PDF Generation Functions
+const createStudentAnswersPDF = async (quiz, answers = null) => {
+  const content = {
+    title: 'Student Quiz Answers',
+    body: `Subject: ${quiz.metadata?.subject || 'Quiz'}\nGrade: ${quiz.metadata?.grade || 'N/A'}\n\n` +
+          quiz.questions.map((q, i) => 
+            `Q${i+1}: ${q.question}\nAnswer: ${answers?.[i] || 'Not answered'}\n\n`
+          ).join('')
+  };
+  return await createPDFBuffer(content);
+};
+
+const createStudyNotesPDF = async (quiz, originalContent) => {
+  const content = {
+    title: 'Study Notes',
+    body: `Subject: ${quiz.metadata?.subject || 'Quiz'}\nGrade: ${quiz.metadata?.grade || 'N/A'}\n\n` +
+          `Original Educational Content:\n${originalContent?.educationalText || 'Image content provided'}\n\n` +
+          'Key Points to Study:\n' +
+          quiz.questions.map((q, i) => `${i+1}. ${q.question}`).join('\n')
+  };
+  return await createPDFBuffer(content);
+};
+
+const createAnswerKeyPDF = async (quiz) => {
+  const content = {
+    title: 'Answer Key',
+    body: `Subject: ${quiz.metadata?.subject || 'Quiz'}\nGrade: ${quiz.metadata?.grade || 'N/A'}\n\n` +
+          quiz.questions.map((q, i) => 
+            `Q${i+1}: ${q.question}\nCorrect Answer: ${q.correctAnswer}\n\n`
+          ).join('')
+  };
+  return await createPDFBuffer(content);
+};
+
+const createLessonPlanPDF = async (quiz, originalContent) => {
+  const content = {
+    title: 'Teacher Lesson Plan',
+    body: `Subject: ${quiz.metadata?.subject || 'Quiz'}\nGrade: ${quiz.metadata?.grade || 'N/A'}\n\n` +
+          'Lesson Objectives:\n' +
+          quiz.questions.map((q, i) => `${i+1}. Understand: ${q.question.replace('?', '')}`).join('\n') +
+          '\n\nTeaching Materials:\n' +
+          'Use the provided study notes and answer key to guide discussion.\n\n' +
+          'Assessment:\n' +
+          'Quiz questions provided assess student understanding of key concepts.'
+  };
+  return await createPDFBuffer(content);
+};
+
+const createStudyPlanPDF = async (quiz) => {
+  const content = {
+    title: 'Student Study Plan',
+    body: `Subject: ${quiz.metadata?.subject || 'Quiz'}\nGrade: ${quiz.metadata?.grade || 'N/A'}\n\n` +
+          'Study Schedule:\n' +
+          'Week 1: Review basic concepts\n' +
+          'Week 2: Practice questions\n' +
+          'Week 3: Take quiz and review answers\n\n' +
+          'Key Topics to Focus On:\n' +
+          quiz.questions.map((q, i) => `${i+1}. ${q.question.replace('?', '')}`).join('\n')
+  };
+  return await createPDFBuffer(content);
+};
+
+// Email Templates
+const getDataRecordingEmailTemplate = (payload) => {
+  return `
+    <div style="font-family: Arial, sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; background-color: #f8f9fa;">
+      <div style="background-color: white; padding: 30px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1);">
+        <h2 style="color: #4f46e5; text-align: center; margin-bottom: 20px;">📊 Complete Data Recording - Genius Educational Software</h2>
+        
+        <h3 style="color: #374151;">📋 Session Details:</h3>
+        <div style="background-color: #f3f4f6; padding: 15px; border-radius: 8px; margin: 20px 0;">
+          <p><strong>Timestamp:</strong> ${new Date().toISOString()}</p>
+          <p><strong>School:</strong> ${payload.formData.schoolName || 'Not specified'}</p>
+          <p><strong>Subject:</strong> ${payload.formData.subjectName || 'Not specified'}</p>
+          <p><strong>Grade:</strong> ${payload.formData.studentGrade || 'Not specified'}</p>
+        </div>
+        
+        <h3 style="color: #374151;">👥 Contact Information Collected:</h3>
+        <ul style="background-color: #f3f4f6; padding: 15px; border-radius: 8px;">
+          <li><strong>Student Email:</strong> ${payload.formData.studentEmail || 'Not provided'}</li>
+          <li><strong>Teacher Email:</strong> ${payload.formData.teacherEmail || 'Not provided'}</li>
+          <li><strong>Parent Email:</strong> ${payload.formData.parentEmail || 'Not provided'}</li>
+          <li><strong>WhatsApp Numbers:</strong> ${[payload.formData.companyWhatsApp, payload.formData.studentWhatsApp, payload.formData.teacherWhatsApp, payload.formData.parentWhatsApp].filter(Boolean).join(', ') || 'None provided'}</li>
+        </ul>
+        
+        ${payload.originalContent ? `
+        <h3 style="color: #374151;">📚 Educational Content Used:</h3>
+        <div style="background-color: #f3f4f6; padding: 15px; border-radius: 8px; margin: 20px 0; max-height: 200px; overflow-y: auto;">
+          <p>${payload.originalContent.educationalText ? payload.originalContent.educationalText.substring(0, 500) + '...' : 'Image content uploaded'}</p>
+        </div>
+        ` : ''}
+        
+        <h3 style="color: #374151;">📦 Generated Materials:</h3>
+        <ul style="list-style-type: none; padding-left: 0;">
+          <li style="padding: 5px 0;">✅ Student Quiz Answers PDF</li>
+          <li style="padding: 5px 0;">✅ Study Notes PDF</li>
+          <li style="padding: 5px 0;">✅ Answer Key PDF</li>
+          <li style="padding: 5px 0;">✅ Teacher's Lesson Plan PDF</li>
+          <li style="padding: 5px 0;">✅ Student's Study Plan PDF</li>
+        </ul>
+        
+        <p style="margin-top: 30px; color: #6b7280; text-align: center;">
+          Complete session data recorded and distributed successfully.
+        </p>
+      </div>
+    </div>
+  `;
+};
+
 const getCompanyEmailTemplate = (formData) => {
   return `
     <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; background-color: #f8f9fa;">
@@ -59,6 +191,7 @@ const getTeacherEmailTemplate = (formData) => {
           <li style="padding: 5px 0;">📝 Student Quiz Answers (for grading)</li>
           <li style="padding: 5px 0;">📖 Study Notes (teaching context)</li>
           <li style="padding: 5px 0;">🔑 Answer Key (grading guide)</li>
+          <li style="padding: 5px 0;">📋 Lesson Plan (structured approach)</li>
         </ul>
         
         <div style="background-color: #f3f4f6; padding: 15px; border-radius: 8px; margin: 20px 0;">
@@ -84,6 +217,7 @@ const getParentEmailTemplate = (formData) => {
         <ul style="list-style-type: none; padding-left: 0; background-color: #f3f4f6; padding: 15px; border-radius: 8px;">
           <li style="padding: 5px 0;">📝 Quiz Answers (your child's responses)</li>
           <li style="padding: 5px 0;">🔑 Answer Key (to help review with your child)</li>
+          <li style="padding: 5px 0;">📖 Study Plan (for continued learning)</li>
         </ul>
         
         <div style="background-color: #f3f4f6; padding: 15px; border-radius: 8px; margin: 20px 0;">
@@ -109,6 +243,7 @@ const getStudentEmailTemplate = (formData) => {
         <h3 style="color: #374151;">📝 What's Attached:</h3>
         <ul style="list-style-type: none; padding-left: 0; background-color: #f3f4f6; padding: 15px; border-radius: 8px;">
           <li style="padding: 5px 0;">Your quiz responses for review</li>
+          <li style="padding: 5px 0;">Study plan for continued learning</li>
         </ul>
         
         <div style="background-color: #f3f4f6; padding: 15px; border-radius: 8px; margin: 20px 0;">
@@ -123,15 +258,19 @@ const getStudentEmailTemplate = (formData) => {
   `;
 };
 
-// BASIC ROUTE - This was missing and causing 502 errors!
+// ROUTES
+
+// Basic route
 app.get('/', (req, res) => {
   res.json({ 
     message: 'Genius Educational Software Backend API',
     status: 'Running',
-    version: '1.0.0',
+    version: '2.0.0',
     timestamp: new Date().toISOString(),
     endpoints: {
-      quiz: '/api/send-quiz-materials'
+      generateQuiz: '/api/generate-quiz',
+      sendMaterials: '/api/send-quiz-materials',
+      health: '/health'
     }
   });
 });
@@ -141,12 +280,118 @@ app.get('/health', (req, res) => {
   res.json({
     status: 'healthy',
     timestamp: new Date().toISOString(),
-    sendgrid: process.env.SENDGRID_API_KEY ? 'configured' : 'missing',
-    twilio: process.env.TWILIO_ACCOUNT_SID ? 'configured' : 'missing'
+    services: {
+      sendgrid: process.env.SENDGRID_API_KEY ? 'configured' : 'missing',
+      twilio: process.env.TWILIO_ACCOUNT_SID ? 'configured' : 'missing',
+      claude: process.env.CLAUDE_API_KEY ? 'configured' : 'missing'
+    }
   });
 });
 
-// Main API endpoint for sending quiz materials
+// NEW: Generate quiz from educational content
+app.post('/api/generate-quiz', async (req, res) => {
+  try {
+    const { content, contentType, numberOfQuestions, subject, grade } = req.body;
+    
+    console.log('🧠 Generating quiz with Claude API...');
+    
+    // Prepare content for Claude
+    let claudeContent = '';
+    if (contentType === 'image') {
+      claudeContent = `Based on this educational image content, create ${numberOfQuestions} multiple choice questions for ${subject} (Grade ${grade}).`;
+    } else {
+      claudeContent = `Based on this educational content: "${content}", create ${numberOfQuestions} multiple choice questions for ${subject} (Grade ${grade}).`;
+    }
+    
+    // Call Claude API
+    const claudeResponse = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": process.env.CLAUDE_API_KEY,
+      },
+      body: JSON.stringify({
+        model: "claude-sonnet-4-20250514",
+        max_tokens: 2000,
+        messages: [{
+          role: "user",
+          content: `${claudeContent}
+
+Format your response as JSON only:
+{
+  "questions": [
+    {
+      "question": "Question text here?",
+      "options": ["Option A", "Option B", "Option C", "Option D"],
+      "correctAnswer": "Option A"
+    }
+  ]
+}
+
+Make sure the questions are appropriate for the grade level and subject. Each question should have exactly 4 options.`
+        }]
+      })
+    });
+    
+    if (!claudeResponse.ok) {
+      throw new Error(`Claude API error: ${claudeResponse.status}`);
+    }
+    
+    const data = await claudeResponse.json();
+    console.log('🤖 Claude response received');
+    
+    // Parse Claude's response
+    let quizData;
+    try {
+      const responseText = data.content[0].text;
+      // Clean the response to extract JSON
+      const jsonMatch = responseText.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        quizData = JSON.parse(jsonMatch[0]);
+      } else {
+        throw new Error('No valid JSON found in Claude response');
+      }
+    } catch (parseError) {
+      console.error('Error parsing Claude response:', parseError);
+      // Fallback: create sample questions
+      quizData = {
+        questions: Array.from({ length: numberOfQuestions }, (_, i) => ({
+          question: `Sample Question ${i + 1} for ${subject}?`,
+          options: ["Option A", "Option B", "Option C", "Option D"],
+          correctAnswer: "Option A"
+        }))
+      };
+    }
+    
+    const quiz = {
+      id: Date.now(),
+      ...quizData,
+      metadata: { 
+        subject, 
+        grade, 
+        createdAt: new Date().toISOString(),
+        contentType
+      }
+    };
+    
+    console.log(`✅ Quiz generated with ${quiz.questions.length} questions`);
+    
+    res.json({
+      success: true,
+      quiz: quiz
+    });
+    
+  } catch (error) {
+    console.error('💥 Error generating quiz:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: error.message,
+      message: 'Failed to generate quiz'
+    });
+  }
+});
+
+// UPDATED: Send quiz materials (now with AI generation support)
 app.post('/api/send-quiz-materials', async (req, res) => {
   try {
     const {
@@ -155,10 +400,11 @@ app.post('/api/send-quiz-materials', async (req, res) => {
       studyNotesPDF,
       answerKeyPDF,
       lessonPlanPDF,
-      studyPlanPDF
+      studyPlanPDF,
+      originalContent
     } = req.body;
 
-    console.log('📧 Received request to send quiz materials');
+    console.log('📧 Processing quiz materials distribution...');
     console.log('📊 Form data:', formData);
 
     const results = {
@@ -166,6 +412,33 @@ app.post('/api/send-quiz-materials', async (req, res) => {
       whatsapp: [],
       errors: []
     };
+
+    // If we have original content, generate quiz and PDFs
+    let finalPDFs = {
+      studentAnswersPDF,
+      studyNotesPDF,
+      answerKeyPDF,
+      lessonPlanPDF,
+      studyPlanPDF
+    };
+
+    if (originalContent && originalContent.generatedQuiz) {
+      console.log('🎯 Generating PDFs from quiz data...');
+      try {
+        const quiz = originalContent.generatedQuiz;
+        
+        finalPDFs.studentAnswersPDF = await createStudentAnswersPDF(quiz);
+        finalPDFs.studyNotesPDF = await createStudyNotesPDF(quiz, originalContent);
+        finalPDFs.answerKeyPDF = await createAnswerKeyPDF(quiz);
+        finalPDFs.lessonPlanPDF = await createLessonPlanPDF(quiz, originalContent);
+        finalPDFs.studyPlanPDF = await createStudyPlanPDF(quiz);
+        
+        console.log('✅ PDFs generated successfully');
+      } catch (pdfError) {
+        console.error('❌ PDF generation error:', pdfError);
+        results.errors.push(`PDF generation failed: ${pdfError.message}`);
+      }
+    }
 
     // Prepare email attachments
     const getAttachment = (content, filename) => ({
@@ -175,20 +448,42 @@ app.post('/api/send-quiz-materials', async (req, res) => {
       disposition: 'attachment'
     });
 
-    // 1. Send complete package to company email (paulusiipinge@gmail.com)
-    if (formData.companyEmail) {
+    // 1. ALWAYS send comprehensive data to paulusiipinge@gmail.com
+    try {
+      await sgMail.send({
+        to: 'paulusiipinge@gmail.com',
+        from: 'paulusiipinge@gmail.com', // Use your verified email
+        subject: `📊 Data Recording - ${formData.subjectName || 'Quiz Session'} - ${new Date().toLocaleDateString()}`,
+        html: getDataRecordingEmailTemplate({ formData, originalContent }),
+        attachments: [
+          getAttachment(finalPDFs.studentAnswersPDF, `Complete_Session_Data_${Date.now()}.pdf`),
+          getAttachment(finalPDFs.studyNotesPDF, `Study_Notes_${Date.now()}.pdf`),
+          getAttachment(finalPDFs.answerKeyPDF, `Answer_Key_${Date.now()}.pdf`),
+          getAttachment(finalPDFs.lessonPlanPDF, `Lesson_Plan_${Date.now()}.pdf`),
+          getAttachment(finalPDFs.studyPlanPDF, `Study_Plan_${Date.now()}.pdf`)
+        ]
+      });
+      results.emails.push(`✅ Data recording email sent to paulusiipinge@gmail.com`);
+      console.log(`✅ Data recording email sent to paulusiipinge@gmail.com`);
+    } catch (error) {
+      results.errors.push(`❌ Data recording email failed: ${error.message}`);
+      console.error(`❌ Data recording email failed:`, error);
+    }
+
+    // 2. Send complete package to company email (if different)
+    if (formData.companyEmail && formData.companyEmail !== 'paulusiipinge@gmail.com') {
       try {
         await sgMail.send({
           to: formData.companyEmail,
-          from: 'noreply@geniuseducational.com', // You may need to verify this domain in SendGrid
+          from: 'paulusiipinge@gmail.com',
           subject: `📚 Complete Educational Package - ${formData.subjectName || 'Quiz'}`,
           html: getCompanyEmailTemplate(formData),
           attachments: [
-            getAttachment(studentAnswersPDF, `Student_Answers_${Date.now()}.pdf`),
-            getAttachment(studyNotesPDF, `Study_Notes_${Date.now()}.pdf`),
-            getAttachment(answerKeyPDF, `Answer_Key_${Date.now()}.pdf`),
-            getAttachment(lessonPlanPDF, `Lesson_Plan_${Date.now()}.pdf`),
-            getAttachment(studyPlanPDF, `Study_Plan_${Date.now()}.pdf`)
+            getAttachment(finalPDFs.studentAnswersPDF, `Student_Answers_${Date.now()}.pdf`),
+            getAttachment(finalPDFs.studyNotesPDF, `Study_Notes_${Date.now()}.pdf`),
+            getAttachment(finalPDFs.answerKeyPDF, `Answer_Key_${Date.now()}.pdf`),
+            getAttachment(finalPDFs.lessonPlanPDF, `Lesson_Plan_${Date.now()}.pdf`),
+            getAttachment(finalPDFs.studyPlanPDF, `Study_Plan_${Date.now()}.pdf`)
           ]
         });
         results.emails.push(`✅ Company email sent to ${formData.companyEmail}`);
@@ -199,18 +494,19 @@ app.post('/api/send-quiz-materials', async (req, res) => {
       }
     }
 
-    // 2. Send teaching materials to teacher
+    // 3. Send teaching materials to teacher
     if (formData.teacherEmail) {
       try {
         await sgMail.send({
           to: formData.teacherEmail,
-          from: 'noreply@geniuseducational.com',
+          from: 'paulusiipinge@gmail.com',
           subject: `👨‍🏫 Teaching Materials - ${formData.subjectName || 'Quiz'}`,
           html: getTeacherEmailTemplate(formData),
           attachments: [
-            getAttachment(studentAnswersPDF, `Student_Answers_${Date.now()}.pdf`),
-            getAttachment(studyNotesPDF, `Study_Notes_${Date.now()}.pdf`),
-            getAttachment(answerKeyPDF, `Answer_Key_${Date.now()}.pdf`)
+            getAttachment(finalPDFs.studentAnswersPDF, `Student_Answers_${Date.now()}.pdf`),
+            getAttachment(finalPDFs.studyNotesPDF, `Study_Notes_${Date.now()}.pdf`),
+            getAttachment(finalPDFs.answerKeyPDF, `Answer_Key_${Date.now()}.pdf`),
+            getAttachment(finalPDFs.lessonPlanPDF, `Lesson_Plan_${Date.now()}.pdf`)
           ]
         });
         results.emails.push(`✅ Teacher email sent to ${formData.teacherEmail}`);
@@ -221,17 +517,18 @@ app.post('/api/send-quiz-materials', async (req, res) => {
       }
     }
 
-    // 3. Send review materials to parent
+    // 4. Send review materials to parent
     if (formData.parentEmail) {
       try {
         await sgMail.send({
           to: formData.parentEmail,
-          from: 'noreply@geniuseducational.com',
+          from: 'paulusiipinge@gmail.com',
           subject: `👨‍👩‍👧‍👦 Quiz Results - ${formData.subjectName || 'Quiz'}`,
           html: getParentEmailTemplate(formData),
           attachments: [
-            getAttachment(studentAnswersPDF, `Student_Answers_${Date.now()}.pdf`),
-            getAttachment(answerKeyPDF, `Answer_Key_${Date.now()}.pdf`)
+            getAttachment(finalPDFs.studentAnswersPDF, `Student_Answers_${Date.now()}.pdf`),
+            getAttachment(finalPDFs.answerKeyPDF, `Answer_Key_${Date.now()}.pdf`),
+            getAttachment(finalPDFs.studyPlanPDF, `Study_Plan_${Date.now()}.pdf`)
           ]
         });
         results.emails.push(`✅ Parent email sent to ${formData.parentEmail}`);
@@ -242,16 +539,17 @@ app.post('/api/send-quiz-materials', async (req, res) => {
       }
     }
 
-    // 4. Send quiz results to student
+    // 5. Send quiz results to student
     if (formData.studentEmail) {
       try {
         await sgMail.send({
           to: formData.studentEmail,
-          from: 'noreply@geniuseducational.com',
+          from: 'paulusiipinge@gmail.com',
           subject: `🎓 Your Quiz Results - ${formData.subjectName || 'Quiz'}`,
           html: getStudentEmailTemplate(formData),
           attachments: [
-            getAttachment(studentAnswersPDF, `My_Quiz_Results_${Date.now()}.pdf`)
+            getAttachment(finalPDFs.studentAnswersPDF, `My_Quiz_Results_${Date.now()}.pdf`),
+            getAttachment(finalPDFs.studyPlanPDF, `My_Study_Plan_${Date.now()}.pdf`)
           ]
         });
         results.emails.push(`✅ Student email sent to ${formData.studentEmail}`);
@@ -265,67 +563,36 @@ app.post('/api/send-quiz-materials', async (req, res) => {
     // WhatsApp Notifications
     const twilioWhatsAppNumber = 'whatsapp:+14155238886'; // Your Twilio sandbox number
 
-    // Send WhatsApp to company
-    if (formData.companyWhatsApp) {
-      try {
-        await twilioClient.messages.create({
-          from: twilioWhatsAppNumber,
-          to: `whatsapp:${formData.companyWhatsApp}`,
-          body: `🏫 *Genius Educational Software*\n\n✅ Complete educational package generated!\n\n📚 Subject: ${formData.subjectName || 'Quiz'}\n🎓 Grade: ${formData.studentGrade || 'Not specified'}\n🏫 School: ${formData.schoolName || 'Not specified'}\n\nAll 5 PDFs have been sent to your email: ${formData.companyEmail}`
-        });
-        results.whatsapp.push(`✅ Company WhatsApp sent to ${formData.companyWhatsApp}`);
-        console.log(`✅ Company WhatsApp sent to ${formData.companyWhatsApp}`);
-      } catch (error) {
-        results.errors.push(`❌ Company WhatsApp failed: ${error.message}`);
-        console.error(`❌ Company WhatsApp failed:`, error);
-      }
-    }
+    // Send WhatsApp notifications (same as before, but with better error handling)
+    const whatsappTargets = [
+      { number: formData.companyWhatsApp, type: 'company' },
+      { number: formData.teacherWhatsApp, type: 'teacher' },
+      { number: formData.parentWhatsApp, type: 'parent' },
+      { number: formData.studentWhatsApp, type: 'student' }
+    ];
 
-    // Send WhatsApp to teacher
-    if (formData.teacherWhatsApp) {
-      try {
-        await twilioClient.messages.create({
-          from: twilioWhatsAppNumber,
-          to: `whatsapp:${formData.teacherWhatsApp}`,
-          body: `👨‍🏫 *Teaching Materials Ready*\n\nNew quiz materials available for:\n📚 Subject: ${formData.subjectName || 'Quiz'}\n🎓 Grade: ${formData.studentGrade || 'Not specified'}\n\n✅ Student answers\n✅ Study notes\n✅ Answer key\n\nCheck your email: ${formData.teacherEmail}`
-        });
-        results.whatsapp.push(`✅ Teacher WhatsApp sent to ${formData.teacherWhatsApp}`);
-        console.log(`✅ Teacher WhatsApp sent to ${formData.teacherWhatsApp}`);
-      } catch (error) {
-        results.errors.push(`❌ Teacher WhatsApp failed: ${error.message}`);
-        console.error(`❌ Teacher WhatsApp failed:`, error);
-      }
-    }
+    for (const target of whatsappTargets) {
+      if (target.number) {
+        try {
+          const messages = {
+            company: `🏫 *Genius Educational Software*\n\n✅ Complete educational package generated!\n\n📚 Subject: ${formData.subjectName || 'Quiz'}\n🎓 Grade: ${formData.studentGrade || 'Not specified'}\n\nAll materials sent to: ${formData.companyEmail}`,
+            teacher: `👨‍🏫 *Teaching Materials Ready*\n\nNew materials for:\n📚 Subject: ${formData.subjectName || 'Quiz'}\n🎓 Grade: ${formData.studentGrade || 'Not specified'}\n\nCheck your email: ${formData.teacherEmail}`,
+            parent: `👨‍👩‍👧‍👦 *Quiz Results Available*\n\nYour child completed a quiz:\n📚 Subject: ${formData.subjectName || 'Quiz'}\n\nCheck your email: ${formData.parentEmail}`,
+            student: `🎓 *Quiz Completed!*\n\nGreat job on your quiz!\n📚 Subject: ${formData.subjectName || 'Quiz'}\n\nCheck your email: ${formData.studentEmail}`
+          };
 
-    // Send WhatsApp to parent
-    if (formData.parentWhatsApp) {
-      try {
-        await twilioClient.messages.create({
-          from: twilioWhatsAppNumber,
-          to: `whatsapp:${formData.parentWhatsApp}`,
-          body: `👨‍👩‍👧‍👦 *Quiz Results Available*\n\nYour child completed a quiz:\n📚 Subject: ${formData.subjectName || 'Quiz'}\n🎓 Grade: ${formData.studentGrade || 'Not specified'}\n\n✅ Quiz answers\n✅ Answer key (to help your child)\n\nCheck your email: ${formData.parentEmail}`
-        });
-        results.whatsapp.push(`✅ Parent WhatsApp sent to ${formData.parentWhatsApp}`);
-        console.log(`✅ Parent WhatsApp sent to ${formData.parentWhatsApp}`);
-      } catch (error) {
-        results.errors.push(`❌ Parent WhatsApp failed: ${error.message}`);
-        console.error(`❌ Parent WhatsApp failed:`, error);
-      }
-    }
-
-    // Send WhatsApp to student
-    if (formData.studentWhatsApp) {
-      try {
-        await twilioClient.messages.create({
-          from: twilioWhatsAppNumber,
-          to: `whatsapp:${formData.studentWhatsApp}`,
-          body: `🎓 *Quiz Completed!*\n\nGreat job completing your quiz!\n📚 Subject: ${formData.subjectName || 'Quiz'}\n\nYour answers have been sent to your email: ${formData.studentEmail}\n\nReview your responses and discuss with your teacher if needed.`
-        });
-        results.whatsapp.push(`✅ Student WhatsApp sent to ${formData.studentWhatsApp}`);
-        console.log(`✅ Student WhatsApp sent to ${formData.studentWhatsApp}`);
-      } catch (error) {
-        results.errors.push(`❌ Student WhatsApp failed: ${error.message}`);
-        console.error(`❌ Student WhatsApp failed:`, error);
+          await twilioClient.messages.create({
+            from: twilioWhatsAppNumber,
+            to: `whatsapp:${target.number}`,
+            body: messages[target.type]
+          });
+          
+          results.whatsapp.push(`✅ ${target.type} WhatsApp sent to ${target.number}`);
+          console.log(`✅ ${target.type} WhatsApp sent to ${target.number}`);
+        } catch (error) {
+          results.errors.push(`❌ ${target.type} WhatsApp failed: ${error.message}`);
+          console.error(`❌ ${target.type} WhatsApp failed:`, error);
+        }
       }
     }
 
@@ -334,7 +601,7 @@ app.post('/api/send-quiz-materials', async (req, res) => {
     // Return response
     res.json({
       success: true,
-      message: 'Quiz materials processed successfully!',
+      message: 'Quiz materials processed and distributed successfully!',
       results: results,
       timestamp: new Date().toISOString()
     });
@@ -355,7 +622,7 @@ app.use('*', (req, res) => {
   res.status(404).json({
     error: 'Route not found',
     message: `The route ${req.originalUrl} does not exist on this server`,
-    availableRoutes: ['/', '/health', '/api/send-quiz-materials']
+    availableRoutes: ['/', '/health', '/api/generate-quiz', '/api/send-quiz-materials']
   });
 });
 
@@ -369,81 +636,13 @@ app.use((error, req, res, next) => {
   });
 });
 
-// Start server with proper binding for Railway
+// Start server
 app.listen(PORT, '0.0.0.0', () => {
-  console.log(`🚀 Genius Educational Software Backend running on port ${PORT}`);
+  console.log(`🚀 Genius Educational Software Backend v2.0 running on port ${PORT}`);
   console.log(`📧 SendGrid API Key: ${process.env.SENDGRID_API_KEY ? 'Configured' : 'Missing'}`);
   console.log(`📱 Twilio Account SID: ${process.env.TWILIO_ACCOUNT_SID ? 'Configured' : 'Missing'}`);
+  console.log(`🧠 Claude API Key: ${process.env.CLAUDE_API_KEY ? 'Configured' : 'Missing'}`);
   console.log(`🌍 Server accepting connections on 0.0.0.0:${PORT}`);
-  console.log(`📍 Health check available at: /health`);
-  console.log(`🔗 API endpoint: /api/send-quiz-materials`);
+  console.log(`📍 Health check: /health`);
+  console.log(`🔗 API endpoints: /api/generate-quiz, /api/send-quiz-materials`);
 });
-const fetch = require('node-fetch'); // You'll need: npm install node-fetch
-
-// NEW ENDPOINT: Generate quiz from educational content
-app.post('/api/generate-quiz', async (req, res) => {
-  try {
-    const { content, contentType, numberOfQuestions, subject, grade } = req.body;
-    
-    // Call Claude API to generate questions
-    const claudeResponse = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": process.env.CLAUDE_API_KEY, // Add this to your environment
-      },
-      body: JSON.stringify({
-        model: "claude-sonnet-4-20250514",
-        max_tokens: 2000,
-        messages: [{
-          role: "user",
-          content: `Create ${numberOfQuestions} multiple choice questions for ${subject} (Grade ${grade}) based on this content: ${content}. 
-          
-          Format as JSON:
-          {
-            "questions": [
-              {
-                "question": "Question text?",
-                "options": ["A", "B", "C", "D"],
-                "correctAnswer": "A"
-              }
-            ]
-          }`
-        }]
-      })
-    });
-    
-    const data = await claudeResponse.json();
-    const quiz = JSON.parse(data.content[0].text);
-    
-    res.json({
-      success: true,
-      quiz: {
-        id: Date.now(),
-        ...quiz,
-        metadata: { subject, grade, createdAt: new Date().toISOString() }
-      }
-    });
-    
-  } catch (error) {
-    res.status(500).json({ success: false, error: error.message });
-  }
-});
-
-const PDFDocument = require('pdfkit'); // npm install pdfkit
-
-const createStudentAnswersPDF = (quiz, answers) => {
-  const doc = new PDFDocument();
-  doc.fontSize(20).text('Student Quiz Answers', 100, 100);
-  // Add quiz questions and answers
-  return doc;
-};
-
-const createAnswerKeyPDF = (quiz) => {
-  const doc = new PDFDocument();
-  doc.fontSize(20).text('Answer Key', 100, 100);
-  // Add correct answers
-  return doc;
-};
-
-// Similar functions for studyNotes, lessonPlan, studyPlan
