@@ -12,7 +12,10 @@
     "cors": "^2.8.5",
     "@sendgrid/mail": "^7.7.0",
     "twilio": "^4.19.0",
-    "dotenv": "^16.3.1"
+    "dotenv": "^16.3.1",
+    "node-fetch": "^2.6.7",
+    "pdfkit": "^0.13.0",
+    "sharp": "^0.32.6"
   },
   "engines": {
     "node": ">=18.0.0"
