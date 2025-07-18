@@ -1,4 +1,3 @@
-// server.js
 const express = require('express');
 const cors = require('cors');
 const sgMail = require('@sendgrid/mail');
@@ -124,15 +123,30 @@ const getStudentEmailTemplate = (formData) => {
   `;
 };
 
-// API Routes
+// BASIC ROUTE - This was missing and causing 502 errors!
 app.get('/', (req, res) => {
   res.json({ 
     message: 'Genius Educational Software Backend API',
     status: 'Running',
-    version: '1.0.0'
+    version: '1.0.0',
+    timestamp: new Date().toISOString(),
+    endpoints: {
+      quiz: '/api/send-quiz-materials'
+    }
   });
-})
+});
 
+// Health check route
+app.get('/health', (req, res) => {
+  res.json({
+    status: 'healthy',
+    timestamp: new Date().toISOString(),
+    sendgrid: process.env.SENDGRID_API_KEY ? 'configured' : 'missing',
+    twilio: process.env.TWILIO_ACCOUNT_SID ? 'configured' : 'missing'
+  });
+});
+
+// Main API endpoint for sending quiz materials
 app.post('/api/send-quiz-materials', async (req, res) => {
   try {
     const {
@@ -144,8 +158,8 @@ app.post('/api/send-quiz-materials', async (req, res) => {
       studyPlanPDF
     } = req.body;
 
-    console.log('Received request to send quiz materials');
-    console.log('Form data:', formData);
+    console.log('📧 Received request to send quiz materials');
+    console.log('📊 Form data:', formData);
 
     const results = {
       emails: [],
@@ -161,12 +175,12 @@ app.post('/api/send-quiz-materials', async (req, res) => {
       disposition: 'attachment'
     });
 
-    // 1. Send complete package to company email
+    // 1. Send complete package to company email (paulusiipinge@gmail.com)
     if (formData.companyEmail) {
       try {
         await sgMail.send({
           to: formData.companyEmail,
-          from: 'noreply@geniuseducational.com',
+          from: 'noreply@geniuseducational.com', // You may need to verify this domain in SendGrid
           subject: `📚 Complete Educational Package - ${formData.subjectName || 'Quiz'}`,
           html: getCompanyEmailTemplate(formData),
           attachments: [
@@ -177,9 +191,11 @@ app.post('/api/send-quiz-materials', async (req, res) => {
             getAttachment(studyPlanPDF, `Study_Plan_${Date.now()}.pdf`)
           ]
         });
-        results.emails.push(`Company email sent to ${formData.companyEmail}`);
+        results.emails.push(`✅ Company email sent to ${formData.companyEmail}`);
+        console.log(`✅ Company email sent to ${formData.companyEmail}`);
       } catch (error) {
-        results.errors.push(`Company email failed: ${error.message}`);
+        results.errors.push(`❌ Company email failed: ${error.message}`);
+        console.error(`❌ Company email failed:`, error);
       }
     }
 
@@ -197,9 +213,11 @@ app.post('/api/send-quiz-materials', async (req, res) => {
             getAttachment(answerKeyPDF, `Answer_Key_${Date.now()}.pdf`)
           ]
         });
-        results.emails.push(`Teacher email sent to ${formData.teacherEmail}`);
+        results.emails.push(`✅ Teacher email sent to ${formData.teacherEmail}`);
+        console.log(`✅ Teacher email sent to ${formData.teacherEmail}`);
       } catch (error) {
-        results.errors.push(`Teacher email failed: ${error.message}`);
+        results.errors.push(`❌ Teacher email failed: ${error.message}`);
+        console.error(`❌ Teacher email failed:`, error);
       }
     }
 
@@ -216,9 +234,11 @@ app.post('/api/send-quiz-materials', async (req, res) => {
             getAttachment(answerKeyPDF, `Answer_Key_${Date.now()}.pdf`)
           ]
         });
-        results.emails.push(`Parent email sent to ${formData.parentEmail}`);
+        results.emails.push(`✅ Parent email sent to ${formData.parentEmail}`);
+        console.log(`✅ Parent email sent to ${formData.parentEmail}`);
       } catch (error) {
-        results.errors.push(`Parent email failed: ${error.message}`);
+        results.errors.push(`❌ Parent email failed: ${error.message}`);
+        console.error(`❌ Parent email failed:`, error);
       }
     }
 
@@ -234,16 +254,18 @@ app.post('/api/send-quiz-materials', async (req, res) => {
             getAttachment(studentAnswersPDF, `My_Quiz_Results_${Date.now()}.pdf`)
           ]
         });
-        results.emails.push(`Student email sent to ${formData.studentEmail}`);
+        results.emails.push(`✅ Student email sent to ${formData.studentEmail}`);
+        console.log(`✅ Student email sent to ${formData.studentEmail}`);
       } catch (error) {
-        results.errors.push(`Student email failed: ${error.message}`);
+        results.errors.push(`❌ Student email failed: ${error.message}`);
+        console.error(`❌ Student email failed:`, error);
       }
     }
 
     // WhatsApp Notifications
-    const twilioWhatsAppNumber = 'whatsapp:+14155238886';
+    const twilioWhatsAppNumber = 'whatsapp:+14155238886'; // Your Twilio sandbox number
 
-    // Send WhatsApp notifications
+    // Send WhatsApp to company
     if (formData.companyWhatsApp) {
       try {
         await twilioClient.messages.create({
@@ -251,12 +273,15 @@ app.post('/api/send-quiz-materials', async (req, res) => {
           to: `whatsapp:${formData.companyWhatsApp}`,
           body: `🏫 *Genius Educational Software*\n\n✅ Complete educational package generated!\n\n📚 Subject: ${formData.subjectName || 'Quiz'}\n🎓 Grade: ${formData.studentGrade || 'Not specified'}\n🏫 School: ${formData.schoolName || 'Not specified'}\n\nAll 5 PDFs have been sent to your email: ${formData.companyEmail}`
         });
-        results.whatsapp.push(`Company WhatsApp sent to ${formData.companyWhatsApp}`);
+        results.whatsapp.push(`✅ Company WhatsApp sent to ${formData.companyWhatsApp}`);
+        console.log(`✅ Company WhatsApp sent to ${formData.companyWhatsApp}`);
       } catch (error) {
-        results.errors.push(`Company WhatsApp failed: ${error.message}`);
+        results.errors.push(`❌ Company WhatsApp failed: ${error.message}`);
+        console.error(`❌ Company WhatsApp failed:`, error);
       }
     }
 
+    // Send WhatsApp to teacher
     if (formData.teacherWhatsApp) {
       try {
         await twilioClient.messages.create({
@@ -264,12 +289,15 @@ app.post('/api/send-quiz-materials', async (req, res) => {
           to: `whatsapp:${formData.teacherWhatsApp}`,
           body: `👨‍🏫 *Teaching Materials Ready*\n\nNew quiz materials available for:\n📚 Subject: ${formData.subjectName || 'Quiz'}\n🎓 Grade: ${formData.studentGrade || 'Not specified'}\n\n✅ Student answers\n✅ Study notes\n✅ Answer key\n\nCheck your email: ${formData.teacherEmail}`
         });
-        results.whatsapp.push(`Teacher WhatsApp sent to ${formData.teacherWhatsApp}`);
+        results.whatsapp.push(`✅ Teacher WhatsApp sent to ${formData.teacherWhatsApp}`);
+        console.log(`✅ Teacher WhatsApp sent to ${formData.teacherWhatsApp}`);
       } catch (error) {
-        results.errors.push(`Teacher WhatsApp failed: ${error.message}`);
+        results.errors.push(`❌ Teacher WhatsApp failed: ${error.message}`);
+        console.error(`❌ Teacher WhatsApp failed:`, error);
       }
     }
 
+    // Send WhatsApp to parent
     if (formData.parentWhatsApp) {
       try {
         await twilioClient.messages.create({
@@ -277,12 +305,15 @@ app.post('/api/send-quiz-materials', async (req, res) => {
           to: `whatsapp:${formData.parentWhatsApp}`,
           body: `👨‍👩‍👧‍👦 *Quiz Results Available*\n\nYour child completed a quiz:\n📚 Subject: ${formData.subjectName || 'Quiz'}\n🎓 Grade: ${formData.studentGrade || 'Not specified'}\n\n✅ Quiz answers\n✅ Answer key (to help your child)\n\nCheck your email: ${formData.parentEmail}`
         });
-        results.whatsapp.push(`Parent WhatsApp sent to ${formData.parentWhatsApp}`);
+        results.whatsapp.push(`✅ Parent WhatsApp sent to ${formData.parentWhatsApp}`);
+        console.log(`✅ Parent WhatsApp sent to ${formData.parentWhatsApp}`);
       } catch (error) {
-        results.errors.push(`Parent WhatsApp failed: ${error.message}`);
+        results.errors.push(`❌ Parent WhatsApp failed: ${error.message}`);
+        console.error(`❌ Parent WhatsApp failed:`, error);
       }
     }
 
+    // Send WhatsApp to student
     if (formData.studentWhatsApp) {
       try {
         await twilioClient.messages.create({
@@ -290,32 +321,60 @@ app.post('/api/send-quiz-materials', async (req, res) => {
           to: `whatsapp:${formData.studentWhatsApp}`,
           body: `🎓 *Quiz Completed!*\n\nGreat job completing your quiz!\n📚 Subject: ${formData.subjectName || 'Quiz'}\n\nYour answers have been sent to your email: ${formData.studentEmail}\n\nReview your responses and discuss with your teacher if needed.`
         });
-        results.whatsapp.push(`Student WhatsApp sent to ${formData.studentWhatsApp}`);
+        results.whatsapp.push(`✅ Student WhatsApp sent to ${formData.studentWhatsApp}`);
+        console.log(`✅ Student WhatsApp sent to ${formData.studentWhatsApp}`);
       } catch (error) {
-        results.errors.push(`Student WhatsApp failed: ${error.message}`);
+        results.errors.push(`❌ Student WhatsApp failed: ${error.message}`);
+        console.error(`❌ Student WhatsApp failed:`, error);
       }
     }
 
-    console.log('Results:', results);
+    console.log('📊 Final Results:', results);
 
+    // Return response
     res.json({
       success: true,
-      message: 'Quiz materials processed',
-      results: results
+      message: 'Quiz materials processed successfully!',
+      results: results,
+      timestamp: new Date().toISOString()
     });
 
   } catch (error) {
-    console.error('Error in send-quiz-materials:', error);
+    console.error('💥 Error in send-quiz-materials:', error);
     res.status(500).json({
       success: false,
       error: error.message,
-      message: 'Failed to send quiz materials'
+      message: 'Failed to send quiz materials',
+      timestamp: new Date().toISOString()
     });
   }
 });
 
+// Handle 404 for unknown routes
+app.use('*', (req, res) => {
+  res.status(404).json({
+    error: 'Route not found',
+    message: `The route ${req.originalUrl} does not exist on this server`,
+    availableRoutes: ['/', '/health', '/api/send-quiz-materials']
+  });
+});
+
+// Error handling middleware
+app.use((error, req, res, next) => {
+  console.error('💥 Unhandled error:', error);
+  res.status(500).json({
+    error: 'Internal server error',
+    message: error.message,
+    timestamp: new Date().toISOString()
+  });
+});
+
+// Start server with proper binding for Railway
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`🚀 Genius Educational Software Backend running on port ${PORT}`);
   console.log(`📧 SendGrid API Key: ${process.env.SENDGRID_API_KEY ? 'Configured' : 'Missing'}`);
   console.log(`📱 Twilio Account SID: ${process.env.TWILIO_ACCOUNT_SID ? 'Configured' : 'Missing'}`);
+  console.log(`🌍 Server accepting connections on 0.0.0.0:${PORT}`);
+  console.log(`📍 Health check available at: /health`);
+  console.log(`🔗 API endpoint: /api/send-quiz-materials`);
 });
