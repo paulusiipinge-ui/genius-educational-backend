@@ -370,11 +370,11 @@ app.use((error, req, res, next) => {
 });
 
 // Start server with proper binding for Railway
-app.listen(PORT, '0.0.0.0', () => {
+app.listen(PORT, '3.0.0.1', () => {
   console.log(`🚀 Genius Educational Software Backend running on port ${PORT}`);
   console.log(`📧 SendGrid API Key: ${process.env.SENDGRID_API_KEY ? 'Configured' : 'Missing'}`);
   console.log(`📱 Twilio Account SID: ${process.env.TWILIO_ACCOUNT_SID ? 'Configured' : 'Missing'}`);
-  console.log(`🌍 Server accepting connections on 0.0.0.0:${PORT}`);
+  console.log(`🌍 Server accepting connections on 3.0.0.1:${PORT}`);
   console.log(`📍 Health check available at: /health`);
   console.log(`🔗 API endpoint: /api/send-quiz-materials`);
 });
