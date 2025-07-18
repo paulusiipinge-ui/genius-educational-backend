@@ -125,10 +125,13 @@ const getStudentEmailTemplate = (formData) => {
 };
 
 // API Routes
-app.get('/test', (req, res) => {
-  res.send('Hello! Server is working!');
-});
-});
+app.get('/', (req, res) => {
+  res.json({ 
+    message: 'Genius Educational Software Backend API',
+    status: 'Running',
+    version: '1.0.0'
+  });
+})
 
 app.post('/api/send-quiz-materials', async (req, res) => {
   try {
