@@ -378,3 +378,72 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log(`📍 Health check available at: /health`);
   console.log(`🔗 API endpoint: /api/send-quiz-materials`);
 });
+const fetch = require('node-fetch'); // You'll need: npm install node-fetch
+
+// NEW ENDPOINT: Generate quiz from educational content
+app.post('/api/generate-quiz', async (req, res) => {
+  try {
+    const { content, contentType, numberOfQuestions, subject, grade } = req.body;
+    
+    // Call Claude API to generate questions
+    const claudeResponse = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": process.env.CLAUDE_API_KEY, // Add this to your environment
+      },
+      body: JSON.stringify({
+        model: "claude-sonnet-4-20250514",
+        max_tokens: 2000,
+        messages: [{
+          role: "user",
+          content: `Create ${numberOfQuestions} multiple choice questions for ${subject} (Grade ${grade}) based on this content: ${content}. 
+          
+          Format as JSON:
+          {
+            "questions": [
+              {
+                "question": "Question text?",
+                "options": ["A", "B", "C", "D"],
+                "correctAnswer": "A"
+              }
+            ]
+          }`
+        }]
+      })
+    });
+    
+    const data = await claudeResponse.json();
+    const quiz = JSON.parse(data.content[0].text);
+    
+    res.json({
+      success: true,
+      quiz: {
+        id: Date.now(),
+        ...quiz,
+        metadata: { subject, grade, createdAt: new Date().toISOString() }
+      }
+    });
+    
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+const PDFDocument = require('pdfkit'); // npm install pdfkit
+
+const createStudentAnswersPDF = (quiz, answers) => {
+  const doc = new PDFDocument();
+  doc.fontSize(20).text('Student Quiz Answers', 100, 100);
+  // Add quiz questions and answers
+  return doc;
+};
+
+const createAnswerKeyPDF = (quiz) => {
+  const doc = new PDFDocument();
+  doc.fontSize(20).text('Answer Key', 100, 100);
+  // Add correct answers
+  return doc;
+};
+
+// Similar functions for studyNotes, lessonPlan, studyPlan
