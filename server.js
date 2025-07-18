@@ -314,8 +314,6 @@ app.post('/api/send-quiz-materials', async (req, res) => {
   }
 });
 
-const PORT = process.env.PORT || 3001;
-
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`🚀 Genius Educational Software Backend running on port ${PORT}`);
   console.log(`📧 SendGrid API Key: ${process.env.SENDGRID_API_KEY ? 'Configured' : 'Missing'}`);
